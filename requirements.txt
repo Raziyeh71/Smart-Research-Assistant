@@ -1,0 +1,14 @@
+langchain>=0.1.0
+langgraph>=0.0.10
+chromadb>=0.4.22
+python-dotenv>=1.0.0
+beautifulsoup4>=4.12.2
+scholarly>=1.7.11
+requests>=2.31.0
+networkx>=3.2.1
+matplotlib>=3.8.2
+PyGithub>=2.1.1
+transformers>=4.36.2
+torch>=2.1.2
+numpy>=1.24.3
+pandas>=2.1.4
