@@ -6,10 +6,11 @@ using advanced NLP techniques to extract key findings and contributions.
 """
 
 from typing import List, Dict, Tuple, Any
-import openai
+from openai import OpenAI
 import os
 from dotenv import load_dotenv
 import logging
+import time
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -21,8 +22,9 @@ class Summarizer:
     def __init__(self):
         """Initialize the summarizer with OpenAI configuration."""
         load_dotenv()
-        openai.api_key = os.getenv("OPENAI_API_KEY")
-        self.model = os.getenv("SUMMARY_MODEL", "gpt-3.5-turbo")
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.model = "gpt-3.5-turbo"  # Using a specific model to avoid rate limits
+        self.retry_delay = 5  # seconds to wait between retries
 
     def summarize_papers(self, papers: List[Dict]) -> List[Tuple[Dict, str]]:
         """
@@ -41,14 +43,17 @@ class Summarizer:
                 prompt = self._create_paper_prompt(paper)
                 
                 # Generate summary using OpenAI
-                summary = self._generate_summary(prompt)
+                summary = self._generate_summary_with_retry(prompt)
                 
-                summaries.append((paper, summary))
-                logger.info(f"Generated summary for paper: {paper.get('title', 'Unknown')}")
+                if summary:
+                    summaries.append((paper, summary))
+                    logger.info(f"Generated summary for paper: {paper.get('title', 'Unknown')}")
                 
             except Exception as e:
                 logger.error(f"Error summarizing paper: {str(e)}")
-                continue
+                # Create a basic summary from available information
+                summary = self._create_basic_summary(paper)
+                summaries.append((paper, summary))
                 
         return summaries
 
@@ -69,75 +74,105 @@ class Summarizer:
                 prompt = self._create_project_prompt(project)
                 
                 # Generate summary using OpenAI
-                summary = self._generate_summary(prompt)
+                summary = self._generate_summary_with_retry(prompt)
                 
-                summaries.append((project, summary))
-                logger.info(f"Generated summary for project: {project.get('full_name', 'Unknown')}")
+                if summary:
+                    summaries.append((project, summary))
+                    logger.info(f"Generated summary for project: {project.get('full_name', 'Unknown')}")
                 
             except Exception as e:
                 logger.error(f"Error summarizing project: {str(e)}")
-                continue
+                # Create a basic summary from available information
+                summary = self._create_basic_project_summary(project)
+                summaries.append((project, summary))
                 
         return summaries
 
+    def _create_basic_summary(self, paper: Dict) -> str:
+        """Create a basic summary when AI generation fails."""
+        title = paper.get('title', 'Unknown')
+        authors = ', '.join(paper.get('authors', []))
+        year = paper.get('year', 'Unknown')
+        abstract = paper.get('abstract', '')
+        
+        return f"""Title: {title}
+Authors: {authors}
+Year: {year}
+Abstract: {abstract[:200]}..."""
+
+    def _create_basic_project_summary(self, project: Dict) -> str:
+        """Create a basic summary when AI generation fails."""
+        name = project.get('full_name', 'Unknown')
+        desc = project.get('description', '')
+        topics = ', '.join(project.get('topics', []))
+        
+        return f"""Repository: {name}
+Description: {desc}
+Topics: {topics}"""
+
     def _create_paper_prompt(self, paper: Dict) -> str:
         """Create a prompt for paper summarization."""
-        return f"""Analyze this research paper and provide a concise, informative summary:
+        return f"""Analyze this research paper and provide a concise summary:
 
 Title: {paper.get('title', 'Unknown')}
 Authors: {', '.join(paper.get('authors', []))}
 Year: {paper.get('year', 'Unknown')}
 Abstract: {paper.get('abstract', '')}
 
-Please provide a brief summary that includes:
-1. Main contribution and key findings
-2. Methodology highlights
-3. Practical implications
-4. Why this paper is significant
+Key points to include:
+1. Main contribution
+2. Key findings
+3. Why it matters
 
-Keep the summary concise and focused on what would be most relevant for a researcher."""
+Keep it brief and focused."""
 
     def _create_project_prompt(self, project: Dict) -> str:
         """Create a prompt for project summarization."""
-        return f"""Analyze this GitHub project and provide a concise, informative summary:
+        return f"""Analyze this GitHub project and provide a concise summary:
 
 Repository: {project.get('full_name', 'Unknown')}
 Description: {project.get('description', '')}
 Topics: {', '.join(project.get('topics', []))}
-README: {project.get('readme_content', '')}
-Paper References: {', '.join(project.get('paper_references', []))}
 
-Please provide a brief summary that includes:
-1. Main purpose and features
-2. Implementation approach
-3. Related research papers or methods
-4. Why this implementation is noteworthy
+Focus on:
+1. Main purpose
+2. Key features
+3. Why it's useful
 
-Focus on what would be most relevant for a researcher looking to implement related methods."""
+Keep it brief and focused."""
 
-    def _generate_summary(self, prompt: str) -> str:
+    def _generate_summary_with_retry(self, prompt: str, max_retries: int = 3) -> str:
         """
-        Generate a summary using OpenAI's API.
+        Generate a summary with retry logic for rate limits.
 
         Args:
             prompt (str): The prompt for generating the summary
+            max_retries (int): Maximum number of retry attempts
 
         Returns:
-            str: Generated summary
+            str: Generated summary or basic information if failed
         """
-        try:
-            response = openai.ChatCompletion.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "You are a research assistant specialized in summarizing academic papers and technical implementations. Provide concise, technical, and insightful summaries."},
-                    {"role": "user", "content": prompt}
-                ],
-                max_tokens=250,
-                temperature=0.5,
-                top_p=0.95
-            )
-            return response.choices[0].message.content.strip()
-            
-        except Exception as e:
-            logger.error(f"Error generating summary: {str(e)}")
-            return "Error generating summary"
+        for attempt in range(max_retries):
+            try:
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {"role": "system", "content": "You are a research assistant. Provide brief, technical summaries."},
+                        {"role": "user", "content": prompt}
+                    ],
+                    max_tokens=150,  # Reduced token count
+                    temperature=0.3   # More focused responses
+                )
+                return response.choices[0].message.content.strip()
+                
+            except Exception as e:
+                logger.warning(f"Attempt {attempt + 1} failed: {str(e)}")
+                if "rate limit" in str(e).lower():
+                    if attempt < max_retries - 1:
+                        wait_time = self.retry_delay * (attempt + 1)
+                        logger.info(f"Rate limit hit. Waiting {wait_time} seconds...")
+                        time.sleep(wait_time)
+                    continue
+                return None
+                
+        return None
