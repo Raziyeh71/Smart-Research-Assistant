@@ -12,3 +12,4 @@ openai>=1.0.0
 torch>=2.1.2
 numpy>=1.24.3
 pandas>=2.1.4
+rich>=13.7.0
