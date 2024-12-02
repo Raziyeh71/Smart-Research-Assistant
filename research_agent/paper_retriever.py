@@ -12,22 +12,30 @@ class PaperRetriever:
         Search for academic papers using Google Scholar
         """
         papers = []
-        search_query = scholarly.search_pubs(query)
-        
-        for i in range(self.max_results):
-            try:
-                paper = next(search_query)
-                paper_info = {
-                    'title': paper.bib.get('title', ''),
-                    'authors': paper.bib.get('author', []),
-                    'year': paper.bib.get('year', ''),
-                    'abstract': paper.bib.get('abstract', ''),
-                    'url': paper.bib.get('url', ''),
-                    'citations': paper.citedby
-                }
-                papers.append(paper_info)
-            except StopIteration:
-                break
+        try:
+            search_query = scholarly.search_pubs(query)
+            
+            for _ in range(self.max_results):
+                try:
+                    paper = next(search_query)
+                    # Handle the paper data directly as it comes from scholarly
+                    paper_info = {
+                        'title': paper['bib'].get('title', ''),
+                        'authors': paper['bib'].get('author', []),
+                        'year': paper['bib'].get('year', ''),
+                        'abstract': paper['bib'].get('abstract', ''),
+                        'url': paper['pub_url'] if 'pub_url' in paper else '',
+                        'citations': paper.get('num_citations', 0)
+                    }
+                    papers.append(paper_info)
+                except StopIteration:
+                    break
+                except Exception as e:
+                    print(f"Error processing paper: {str(e)}")
+                    continue
+                    
+        except Exception as e:
+            print(f"Error searching papers: {str(e)}")
             
         return papers
 
