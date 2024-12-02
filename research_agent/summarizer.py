@@ -23,7 +23,10 @@ class Summarizer:
         """Initialize the summarizer with OpenAI configuration."""
         load_dotenv()
         self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = "gpt-3.5-turbo"  # Using a specific model to avoid rate limits
+        self.models = {
+            'primary': "gpt-4",          # Better quality
+            'fallback': "gpt-3.5-turbo"  # Higher rate limits
+        }
         self.retry_delay = 5  # seconds to wait between retries
 
     def summarize_papers(self, papers: List[Dict]) -> List[Tuple[Dict, str]]:
@@ -155,7 +158,7 @@ Keep it brief and focused."""
         for attempt in range(max_retries):
             try:
                 response = self.client.chat.completions.create(
-                    model=self.model,
+                    model=self.models['primary'],
                     messages=[
                         {"role": "system", "content": "You are a research assistant. Provide brief, technical summaries."},
                         {"role": "user", "content": prompt}
@@ -172,6 +175,7 @@ Keep it brief and focused."""
                         wait_time = self.retry_delay * (attempt + 1)
                         logger.info(f"Rate limit hit. Waiting {wait_time} seconds...")
                         time.sleep(wait_time)
+                        self.models['primary'] = self.models['fallback']
                     continue
                 return None
                 
